@@ -2,7 +2,7 @@
 enabled = true
 port = all
 filter = mygopot
-logpath = /home/debian/GoPot/log-*.txt
+logpath = /path/to/log-*.txt
 maxretry = 1
 findtime = 600
 bantime = 3600
