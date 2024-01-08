@@ -66,7 +66,7 @@ func listenOnPort(port string, waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
 	// Start listening on the specified port
-	listener, err := net.Listen("tcp", "localhost:"+port)
+	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		fileLogger.Fatalf("Error listening on port %s: %s", port, err)
 	}
