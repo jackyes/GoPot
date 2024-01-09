@@ -1,3 +1,4 @@
+#Add this in /etc/fail2ban/jail.local
 [mygopot]
 enabled = true
 port = all
