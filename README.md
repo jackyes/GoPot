@@ -31,6 +31,8 @@ Run the program with the following command, specifying the ports to listen on us
 
 
 This will start the honeypot and listen on ports 22, 80, and 8080.
+Default ports are: ```21,23,110,135,136,137,138,139,445,995,143,993,3306,3389,5900,6379,27017,5060```  
+Note: Ports must be not used by other programs  
 
 ## Logs
 
