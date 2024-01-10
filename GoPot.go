@@ -128,6 +128,6 @@ func main() {
 }
 
 func init() {
-	maxConnections = 100 // Imposta il limite di connessioni
+	maxConnections = 100 // Set Max concurrent connections
 	semaphore = make(chan struct{}, maxConnections)
 }
