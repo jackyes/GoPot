@@ -6,9 +6,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -34,10 +36,33 @@ func setupLoggers() {
 	consoleLogger = log.New(os.Stdout, "", log.LstdFlags)
 }
 
+func setupSignalHandling() {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigs
+		consoleLogger.Printf("Received signal: %s", sig)
+		fileLogger.Printf("Shutting down due to signal: %s", sig)
+
+		// Chiusura delle connessioni aperte (esempio)
+		// closeOpenConnections()
+
+		// Registrazione del messaggio di chiusura
+		consoleLogger.Println("Application shutting down.")
+		fileLogger.Println("Application shutting down.")
+
+		// Altre operazioni di pulizia se necessario
+		// ...
+
+		os.Exit(0)
+	}()
+}
+
 // handleConnection handles incoming connections and logs the details.
 func handleConnection(conn net.Conn, port string) {
 	defer func() {
-		<-semaphore // Rilascia il semaforo
+		<-semaphore // Release semaphore
 		conn.Close()
 	}()
 
@@ -45,7 +70,6 @@ func handleConnection(conn net.Conn, port string) {
 	conn.SetDeadline(time.Now().Add(timeoutDuration))
 
 	clientAddr := conn.RemoteAddr().String()
-
 	// Log connection details to console and file
 	msg := fmt.Sprintf("Received connection on port %s from %s", port, clientAddr)
 	consoleLogger.Println(msg)
@@ -54,6 +78,7 @@ func handleConnection(conn net.Conn, port string) {
 	_, err := conn.Write([]byte("Authentication failed."))
 	if err != nil {
 		errMsg := fmt.Sprintf("Error writing to connection on port %s: %s", port, err)
+		consoleLogger.Println(errMsg)
 		fileLogger.Println(errMsg)
 		return
 	}
@@ -65,16 +90,20 @@ func listenOnPort(port string, waitGroup *sync.WaitGroup) {
 
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		fileLogger.Fatalf("Error listening on port %s: %s", port, err)
+		errMsg := fmt.Sprintf("Error listening on port %s: %s", port, err)
+		consoleLogger.Println(errMsg)
+		fileLogger.Fatalf(errMsg)
 	}
 	consoleLogger.Printf("Listening on port %s", port)
 
 	for {
-		semaphore <- struct{}{} // Acquisisce il semaforo
+		semaphore <- struct{}{} // Acquire semaphore
 		connection, err := listener.Accept()
 		if err != nil {
-			<-semaphore // Rilascia il semaforo in caso di errore
-			fileLogger.Printf("Error accepting connection on port %s: %s", port, err)
+			<-semaphore // Release semaphore on error
+			errMsg := fmt.Sprintf("Error accepting connection on port %s: %s", port, err)
+			consoleLogger.Println(errMsg)
+			fileLogger.Println(errMsg)
 			continue
 		}
 		go handleConnection(connection, port)
@@ -91,15 +120,13 @@ func isValidPort(port string) bool {
 }
 
 func main() {
-	// Initialize loggers
 	setupLoggers()
+	setupSignalHandling()
 
-	// Parse command-line flags for ports
 	var portsFlag string
 	flag.StringVar(&portsFlag, "ports", "21,23,110,135,136,137,138,139,445,995,143,993,3306,3389,5900,6379,27017,5060", "comma-separated list of ports to listen on")
 	flag.Parse()
 
-	// Validate and filter ports
 	ports := strings.Split(portsFlag, ",")
 	var validPorts []string
 	for _, port := range ports {
@@ -110,24 +137,21 @@ func main() {
 		}
 	}
 
-	// Check if there are any valid ports to listen on
 	if len(validPorts) == 0 {
 		consoleLogger.Println("No valid ports provided. Exiting.")
 		os.Exit(1)
 	}
 
-	// Listen on each valid port
 	var waitGroup sync.WaitGroup
 	for _, port := range validPorts {
 		waitGroup.Add(1)
 		go listenOnPort(port, &waitGroup)
 	}
 
-	// Wait for all listening routines to complete
 	waitGroup.Wait()
 }
 
 func init() {
-	maxConnections = 100 // Set Max concurrent connections
+	maxConnections = 100
 	semaphore = make(chan struct{}, maxConnections)
 }
