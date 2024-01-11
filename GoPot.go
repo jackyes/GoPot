@@ -15,10 +15,12 @@ import (
 )
 
 var (
-	fileLogger     *log.Logger // Logger for writing to the log file
-	consoleLogger  *log.Logger // Logger for writing to the console
-	maxConnections int
-	semaphore      chan struct{}
+	fileLogger        *log.Logger // Logger for writing to the log file
+	consoleLogger     *log.Logger // Logger for writing to the console
+	maxConnections    int
+	semaphore         chan struct{}
+	activeConnections map[net.Conn]struct{}
+	connMutex         sync.Mutex
 )
 
 // setupLoggers initializes both file and console loggers.
@@ -45,15 +47,11 @@ func setupSignalHandling() {
 		consoleLogger.Printf("Received signal: %s", sig)
 		fileLogger.Printf("Shutting down due to signal: %s", sig)
 
-		// Chiusura delle connessioni aperte (esempio)
-		// closeOpenConnections()
+		// call to close open connections
+		closeOpenConnections()
 
-		// Registrazione del messaggio di chiusura
 		consoleLogger.Println("Application shutting down.")
 		fileLogger.Println("Application shutting down.")
-
-		// Altre operazioni di pulizia se necessario
-		// ...
 
 		os.Exit(0)
 	}()
@@ -61,7 +59,13 @@ func setupSignalHandling() {
 
 // handleConnection handles incoming connections and logs the details.
 func handleConnection(conn net.Conn, port string) {
+	connMutex.Lock()
+	activeConnections[conn] = struct{}{}
+	connMutex.Unlock()
 	defer func() {
+		connMutex.Lock()
+		delete(activeConnections, conn)
+		connMutex.Unlock()
 		<-semaphore // Release semaphore
 		conn.Close()
 	}()
@@ -151,7 +155,20 @@ func main() {
 	waitGroup.Wait()
 }
 
+func closeOpenConnections() {
+	connMutex.Lock()
+	defer connMutex.Unlock()
+
+	for conn := range activeConnections {
+		_ = conn.Close() // Close the connection and ignore the error if any
+		delete(activeConnections, conn)
+	}
+	consoleLogger.Println("All active connections closed.")
+	fileLogger.Println("All active connections closed.")
+}
+
 func init() {
 	maxConnections = 100
 	semaphore = make(chan struct{}, maxConnections)
+	activeConnections = make(map[net.Conn]struct{})
 }
