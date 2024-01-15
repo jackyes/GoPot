@@ -21,18 +21,31 @@ var (
 	semaphore         chan struct{}
 	activeConnections map[net.Conn]struct{}
 	connMutex         sync.Mutex
+    logFile        *os.File       // Current log file
+    lastLogDate    string         // Date of the last log entry
 )
 
 // setupLoggers initializes both file and console loggers.
 func setupLoggers() {
 	// Set up file logger
 	currentTime := time.Now()
-	logFileName := fmt.Sprintf("log-%s.txt", currentTime.Format("2006-01-02"))
-	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("Unable to open log file: %v", err)
+	currentDate := currentTime.Format("2006-01-02")
+
+	// Check if a new log file is needed for the current day
+	if lastLogDate != currentDate {
+		if logFile != nil {
+			logFile.Close() // Close the old log file if open
+		}
+		logFileName := fmt.Sprintf("log-%s.txt", currentDate)
+		var err error
+		logFile, err = os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatalf("Unable to open log file: %v", err)
+		}
+
+		fileLogger = log.New(logFile, "", log.LstdFlags)
+		lastLogDate = currentDate // Update the date of the last log
 	}
-	fileLogger = log.New(logFile, "", log.LstdFlags)
 
 	// Set up console logger
 	consoleLogger = log.New(os.Stdout, "", log.LstdFlags)
@@ -168,6 +181,8 @@ func closeOpenConnections() {
 }
 
 func init() {
+	lastLogDate = "" // Set the last log date to an empty string
+	setupLoggers() // Call setupLoggers at the beginning to initialize loggers	
 	maxConnections = 100
 	semaphore = make(chan struct{}, maxConnections)
 	activeConnections = make(map[net.Conn]struct{})
