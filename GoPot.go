@@ -21,8 +21,8 @@ var (
 	semaphore         chan struct{}
 	activeConnections map[net.Conn]struct{}
 	connMutex         sync.Mutex
-    logFile        *os.File       // Current log file
-    lastLogDate    string         // Date of the last log entry
+	logFile           *os.File // Current log file
+	lastLogDate       string   // Date of the last log entry
 )
 
 // setupLoggers initializes both file and console loggers.
@@ -66,12 +66,17 @@ func setupSignalHandling() {
 		consoleLogger.Println("Application shutting down.")
 		fileLogger.Println("Application shutting down.")
 
+		if logFile != nil {
+			logFile.Close()
+		}
+
 		os.Exit(0)
 	}()
 }
 
 // handleConnection handles incoming connections and logs the details.
 func handleConnection(conn net.Conn, port string) {
+	setupLoggers() // Ensure loggers are up to date
 	connMutex.Lock()
 	activeConnections[conn] = struct{}{}
 	connMutex.Unlock()
@@ -182,7 +187,7 @@ func closeOpenConnections() {
 
 func init() {
 	lastLogDate = "" // Set the last log date to an empty string
-	setupLoggers() // Call setupLoggers at the beginning to initialize loggers	
+	setupLoggers()   // Call setupLoggers at the beginning to initialize loggers
 	maxConnections = 100
 	semaphore = make(chan struct{}, maxConnections)
 	activeConnections = make(map[net.Conn]struct{})
