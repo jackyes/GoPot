@@ -25,30 +25,37 @@ var (
 	lastLogDate       string   // Date of the last log entry
 )
 
-// setupLoggers initializes both file and console loggers.
+// setupLoggers configures and manages log files for daily logging.
+// It creates a new log file for each day and archives the previous day's log.
 func setupLoggers() {
-	// Set up file logger
 	currentTime := time.Now()
-	currentDate := currentTime.Format("2006-01-02")
+	currentDate := currentTime.Format("2006-01-02") // Current date formatted as YYYY-MM-DD
 
-	// Check if a new log file is needed for the current day
-	if lastLogDate != currentDate {
+	// Check if the date has changed. If so, close the current log file and archive it.
+	if lastLogDate != "" && lastLogDate != currentDate {
 		if logFile != nil {
-			logFile.Close() // Close the old log file if open
+			logFile.Close() // Close the existing log file
+			// Rename the current log file to include the date for archiving
+			oldLogFileName := fmt.Sprintf("log-%s.txt", lastLogDate)
+			os.Rename("log.txt", oldLogFileName) // Archive the log file by renaming it
 		}
-		logFileName := fmt.Sprintf("log-%s.txt", currentDate)
-		var err error
-		logFile, err = os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			log.Fatalf("Unable to open log file: %v", err)
-		}
-
-		fileLogger = log.New(logFile, "", log.LstdFlags)
-		lastLogDate = currentDate // Update the date of the last log
 	}
 
-	// Set up console logger
-	consoleLogger = log.New(os.Stdout, "", log.LstdFlags)
+	// Set up a new log file for the current day
+	if lastLogDate != currentDate {
+		var err error
+		// Open or create a log file for writing and appending with appropriate permissions
+		logFile, err = os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatalf("Unable to open log file: %v", err) // Fatal error if the log file cannot be opened
+		}
+
+		fileLogger = log.New(logFile, "", log.LstdFlags) // Initialize the file logger
+		lastLogDate = currentDate                        // Update the last log date to the current date
+	}
+
+	// Setup the console logger to output logs to the standard output
+	consoleLogger = log.New(os.Stdout, "", log.LstdFlags) // Initialize the console logger
 }
 
 func setupSignalHandling() {
