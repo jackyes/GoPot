@@ -14,15 +14,16 @@ import (
 	"time"
 )
 
+// Global variables for managing logging, connections, and synchronization
 var (
 	fileLogger        *log.Logger // Logger for writing to the log file
 	consoleLogger     *log.Logger // Logger for writing to the console
-	maxConnections    int
-	semaphore         chan struct{}
-	activeConnections map[net.Conn]struct{}
-	connMutex         sync.Mutex
-	logFile           *os.File // Current log file
-	lastLogDate       string   // Date of the last log entry
+	maxConnections    int         // Maximum number of concurrent connections
+	semaphore         chan struct{} // Semaphore for limiting concurrent connections
+	activeConnections map[net.Conn]struct{} // Map to track active connections
+	connMutex         sync.Mutex // Mutex for synchronizing access to the activeConnections map
+	logFile           *os.File // Current log file for writing logs
+	lastLogDate       string   // Date of the last log entry, used for rotating log files
 )
 
 // setupLoggers configures and manages log files for daily logging.
@@ -44,7 +45,6 @@ func setupLoggers() {
 	// Set up a new log file for the current day
 	if lastLogDate != currentDate {
 		var err error
-		// Open or create a log file for writing and appending with appropriate permissions
 		logFile, err = os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			log.Fatalf("Unable to open log file: %v", err) // Fatal error if the log file cannot be opened
@@ -58,6 +58,8 @@ func setupLoggers() {
 	consoleLogger = log.New(os.Stdout, "", log.LstdFlags) // Initialize the console logger
 }
 
+// setupSignalHandling configures handling for SIGINT and SIGTERM signals.
+// It gracefully shuts down the application by closing open connections and the log file.
 func setupSignalHandling() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -67,21 +69,21 @@ func setupSignalHandling() {
 		consoleLogger.Printf("Received signal: %s", sig)
 		fileLogger.Printf("Shutting down due to signal: %s", sig)
 
-		// call to close open connections
-		closeOpenConnections()
+		closeOpenConnections() // Close all open connections
 
 		consoleLogger.Println("Application shutting down.")
 		fileLogger.Println("Application shutting down.")
 
 		if logFile != nil {
-			logFile.Close()
+			logFile.Close() // Close the log file
 		}
 
-		os.Exit(0)
+		os.Exit(0) // Exit the application
 	}()
 }
 
 // handleConnection handles incoming connections and logs the details.
+// It also manages connection timeouts and closes the connection after handling.
 func handleConnection(conn net.Conn, port string) {
 	setupLoggers() // Ensure loggers are up to date
 	connMutex.Lock()
@@ -92,11 +94,11 @@ func handleConnection(conn net.Conn, port string) {
 		delete(activeConnections, conn)
 		connMutex.Unlock()
 		<-semaphore // Release semaphore
-		conn.Close()
+		conn.Close() // Close the connection
 	}()
 
 	timeoutDuration := 15 * time.Second
-	conn.SetDeadline(time.Now().Add(timeoutDuration))
+	conn.SetDeadline(time.Now().Add(timeoutDuration)) // Set a timeout for the connection
 
 	clientAddr := conn.RemoteAddr().String()
 	// Log connection details to console and file
@@ -113,7 +115,8 @@ func handleConnection(conn net.Conn, port string) {
 	}
 }
 
-// listenOnPort listens on a specified port and handles connections.
+// listenOnPort listens on a specified port and handles incoming connections.
+// It acquires a semaphore before accepting a connection to limit concurrency.
 func listenOnPort(port string, waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
@@ -177,9 +180,11 @@ func main() {
 		go listenOnPort(port, &waitGroup)
 	}
 
-	waitGroup.Wait()
+	waitGroup.Wait() // Wait for all port listeners to finish
 }
 
+// closeOpenConnections closes all active connections.
+// It is called during graceful shutdown to ensure all resources are released.
 func closeOpenConnections() {
 	connMutex.Lock()
 	defer connMutex.Unlock()
