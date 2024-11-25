@@ -24,16 +24,19 @@ var (
 	connMutex         sync.Mutex // Mutex for synchronizing access to the activeConnections map
 	logFile           *os.File // Current log file for writing logs
 	lastLogDate       string   // Date of the last log entry, used for rotating log files
+	logMu             sync.Mutex // Mutex for logger setup
 )
 
 // setupLoggers configures and manages log files for daily logging.
 // It creates a new log file for each day and archives the previous day's log.
 func setupLoggers() {
-	currentTime := time.Now()
+    logMu.Lock()
+    defer logMu.Unlock()
+    currentTime := time.Now()
 	currentDate := currentTime.Format("2006-01-02") // Current date formatted as YYYY-MM-DD
 
 	// Check if the date has changed. If so, close the current log file and archive it.
-	if lastLogDate != "" && lastLogDate != currentDate {
+	if lastLogDate != currentDate {
 		if logFile != nil {
 			logFile.Close() // Close the existing log file
 			// Rename the current log file to include the date for archiving
@@ -85,46 +88,55 @@ func setupSignalHandling() {
 // handleConnection handles incoming connections and logs the details.
 // It also manages connection timeouts and closes the connection after handling.
 func handleConnection(conn net.Conn, port string) {
-	setupLoggers() // Ensure loggers are up to date
-	connMutex.Lock()
-	activeConnections[conn] = struct{}{}
-	connMutex.Unlock()
-	defer func() {
-		connMutex.Lock()
-		delete(activeConnections, conn)
-		connMutex.Unlock()
-		<-semaphore // Release semaphore
-		conn.Close() // Close the connection
-	}()
+    defer func() {
+        connMutex.Lock()
+        delete(activeConnections, conn)
+        connMutex.Unlock()
+        <-semaphore // Release semaphore
+        conn.Close() // Close the connection
+    }()
 
-	timeoutDuration := 15 * time.Second
-	conn.SetDeadline(time.Now().Add(timeoutDuration)) // Set a timeout for the connection
+    clientAddr := conn.RemoteAddr().String()
+    // Log connection details to console and file
+    msg := fmt.Sprintf("Received connection on port %s from %s", port, clientAddr)
+    consoleLogger.Println(msg)
+    fileLogger.Println(msg)
 
-	clientAddr := conn.RemoteAddr().String()
-	// Log connection details to console and file
-	msg := fmt.Sprintf("Received connection on port %s from %s", port, clientAddr)
-	consoleLogger.Println(msg)
-	fileLogger.Println(msg)
+    _, err := conn.Write([]byte("Authentication failed.\n"))
+    if err != nil {
+        errMsg := fmt.Sprintf("Error writing to connection on port %s: %s", port, err)
+        consoleLogger.Println(errMsg)
+        fileLogger.Println(errMsg)
+        return
+    }
 
-	_, err := conn.Write([]byte("Authentication failed."))
-	if err != nil {
-		errMsg := fmt.Sprintf("Error writing to connection on port %s: %s", port, err)
-		consoleLogger.Println(errMsg)
-		fileLogger.Println(errMsg)
-		return
-	}
+    // Read and log client data
+    buffer := make([]byte, 1024)
+    n, err := conn.Read(buffer)
+    if err != nil {
+        errMsg := fmt.Sprintf("Error reading from connection on port %s: %s", port, err)
+        consoleLogger.Println(errMsg)
+        fileLogger.Println(errMsg)
+        return
+    }
+
+    data := string(buffer[:n])
+    msg = fmt.Sprintf("Received data on port %s from %s: %s", port, clientAddr, data)
+    consoleLogger.Println(msg)
+    fileLogger.Println(msg)
 }
 
 // listenOnPort listens on a specified port and handles incoming connections.
 // It acquires a semaphore before accepting a connection to limit concurrency.
-func listenOnPort(port string, waitGroup *sync.WaitGroup) {
-	defer waitGroup.Done()
+func listenOnPort(port string, wg *sync.WaitGroup) {
+    defer wg.Done()
 
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error listening on port %s: %s", port, err)
 		consoleLogger.Println(errMsg)
-		fileLogger.Fatalf(errMsg)
+        fileLogger.Println(errMsg)
+        return
 	}
 	consoleLogger.Printf("Listening on port %s", port)
 
@@ -138,6 +150,11 @@ func listenOnPort(port string, waitGroup *sync.WaitGroup) {
 			fileLogger.Println(errMsg)
 			continue
 		}
+
+        connMutex.Lock()
+        activeConnections[connection] = struct{}{}
+        connMutex.Unlock()
+
 		go handleConnection(connection, port)
 	}
 }
@@ -145,10 +162,7 @@ func listenOnPort(port string, waitGroup *sync.WaitGroup) {
 // isValidPort checks if the provided port string is a valid TCP port.
 func isValidPort(port string) bool {
 	p, err := strconv.Atoi(port)
-	if err != nil {
-		return false
-	}
-	return p > 0 && p <= 65535
+	return err == nil && p > 0 && p <= 65535
 }
 
 func main() {
@@ -174,13 +188,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	var waitGroup sync.WaitGroup
+    maxConnections = 100
+    semaphore = make(chan struct{}, maxConnections)
+    activeConnections = make(map[net.Conn]struct{})
+
+    var wg sync.WaitGroup
 	for _, port := range validPorts {
-		waitGroup.Add(1)
-		go listenOnPort(port, &waitGroup)
+        wg.Add(1)
+        go listenOnPort(port, &wg)
 	}
 
-	waitGroup.Wait() // Wait for all port listeners to finish
+	wg.Wait() // Wait for all port listeners to finish
 }
 
 // closeOpenConnections closes all active connections.
@@ -195,12 +213,4 @@ func closeOpenConnections() {
 	}
 	consoleLogger.Println("All active connections closed.")
 	fileLogger.Println("All active connections closed.")
-}
-
-func init() {
-	lastLogDate = "" // Set the last log date to an empty string
-	setupLoggers()   // Call setupLoggers at the beginning to initialize loggers
-	maxConnections = 100
-	semaphore = make(chan struct{}, maxConnections)
-	activeConnections = make(map[net.Conn]struct{})
 }
